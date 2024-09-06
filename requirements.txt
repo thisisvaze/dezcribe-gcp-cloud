@@ -1,2 +1,13 @@
-Flask==3.0.3
+fastapi
 pytest==8.3.2
+ffmpeg-python
+pydub
+google-cloud-aiplatform
+moviepy
+gunicorn
+azure-cognitiveservices-speech
+elevenlabs
+python-dotenv
+python-multipart
+uvicorn
+google-cloud-storage
