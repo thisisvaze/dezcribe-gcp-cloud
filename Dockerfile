@@ -34,8 +34,9 @@ ENV GOOGLE_APPLICATION_CREDENTIALS=./gckey.json
 RUN apt-get update && apt-get install -y ffmpeg && \
     pip install -r requirements.txt
 
-    # Expose the port the app runs on
+
+# Expose the port the app runs on
 EXPOSE 8080
 
 # Run the web service on container startup using Gunicorn with Uvicorn worker.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "${PORT:-8080}"]
