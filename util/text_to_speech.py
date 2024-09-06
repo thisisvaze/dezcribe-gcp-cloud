@@ -62,7 +62,7 @@ async def text_to_wav_elevenlabs(voice_id: str, text: str, filename: str):
             f.write(chunk)
     print(f'Generated speech saved to "{filename}"')
 
-async def generate_wav_files_from_response(response_body: dict, model_name: str):
+async def generate_wav_files_from_response(response_body: dict, model_name: str, unique_id: str):
     description = response_body["description"]
     logging.info(f"Description: {description}")
     pattern = re.compile(r'\[(\d{1,2}:\d{2}(?:\.\d{3})?)\] (.+)')
@@ -93,7 +93,7 @@ async def generate_wav_files_from_response(response_body: dict, model_name: str)
     for match in matches:
         timestamp, text = match
         start_time = timestamp.strip('[')
-        filename = f"temp/{start_time.replace(':', '-')}.wav"
+        filename = f"temp/{unique_id}_{start_time.replace(':', '-')}.wav"
         logging.info(f"Generating WAV for text: '{text}' at timestamp: {start_time} with filename: {filename}")
         tasks.append(limited_tts_utility(model_name, text, filename))
 
@@ -102,7 +102,7 @@ async def generate_wav_files_from_response(response_body: dict, model_name: str)
     for match in matches:
         timestamp, text = match
         start_time = timestamp.strip('[')
-        filename = f"temp/{start_time.replace(':', '-')}.wav"
+        filename = f"temp/{unique_id}_{start_time.replace(':', '-')}.wav"
         logging.info(f"Generating WAV for text: '{text}' at timestamp: {start_time} with filename: {filename}")
         
         max_wait_time = 30
@@ -127,7 +127,7 @@ async def generate_wav_files_from_response(response_body: dict, model_name: str)
             start_dt = datetime.datetime.strptime(start_time, "%M:%S")
 
         end_time = (start_dt + datetime.timedelta(seconds=duration)).strftime("%M-%S.%f")[:-3]
-        new_filename = f"temp/{start_time.replace(':', '-')}_to_{end_time}.wav"
+        new_filename = f"temp/{unique_id}_{start_time.replace(':', '-')}_to_{end_time}.wav"
         os.rename(filename, new_filename)
         logging.info(f"Generated speech saved to \"{new_filename}\"")
 
@@ -214,7 +214,7 @@ async def main_function(gcs_url):
         "description": response_audio_desc["description"],
     }
     try:
-        await create_final_video_v2(video_path, response_body, output_path, "ElevenLabs")
+        await create_final_video_v2(video_path, response_body, output_path, "ElevenLabs", unique_id)
     except ValueError as e:
         logging.error(f"Error during video processing: {e}")
         return {"status": "error", "message": str(e)}
@@ -226,12 +226,24 @@ async def main_function(gcs_url):
 
     os.remove(video_path)
     os.remove(output_path)
-    shutil.rmtree('temp')
-    os.makedirs('temp', exist_ok=True)
+    # Remove only the .wav files with the unique_id
+    wav_files = glob.glob(f'temp/{unique_id}_*.wav')
+    for wav_file in wav_files:
+        os.remove(wav_file)
+    
+    # Remove the temporary video file
+    temp_video_file = f"temp/temp_video_{unique_id}.mp4"
+    if os.path.exists(temp_video_file):
+        os.remove(temp_video_file)
+
+    # Remove the temporary video file
+    temp_generated_wav_file = f"temp/temp_video_{unique_id}.wav"
+    if os.path.exists(temp_generated_wav_file):
+        os.remove(temp_generated_wav_file)
     
     return {"status": "success", "output_url": gcs_url}
 
-async def create_final_video_v2(video_path: str, response_body: dict, output_path: str, model_name):
+async def create_final_video_v2(video_path: str, response_body: dict, output_path: str, model_name, unique_id: str):
     logging.info(f"Starting create_final_video_v2 with video_path: {video_path}, output_path: {output_path}, model_name: {model_name}")
     
     original_videos_audio = convert_mp4_to_wav(video_path)
@@ -243,7 +255,7 @@ async def create_final_video_v2(video_path: str, response_body: dict, output_pat
         original_audio_clip = AudioFileClip(original_videos_audio)
         logging.info(f"Loaded original audio clip with duration: {original_audio_clip.duration}")
 
-    response_audio_timestamps = await generate_wav_files_from_response(response_body, model_name)
+    response_audio_timestamps = await generate_wav_files_from_response(response_body, model_name, unique_id)
     if not response_audio_timestamps:
         logging.error("Failed to generate response audio timestamps")
         raise ValueError("Failed to generate response audio timestamps")
@@ -271,7 +283,7 @@ async def create_final_video_v2(video_path: str, response_body: dict, output_pat
         ts_start_seconds = int(ts_parts[0]) * 60 + float(ts_parts[1])
         logging.info(f"Calculated start time in seconds: {ts_start_seconds}")
 
-        audio_filename = f"temp/{start_timestamp.replace(':', '-')}_to_*.wav"
+        audio_filename = f"temp/{unique_id}_{start_timestamp.replace(':', '-')}_to_*.wav"
         audio_files = glob.glob(audio_filename)
         if not audio_files:
             raise FileNotFoundError(f"Audio file matching {audio_filename} not found")
