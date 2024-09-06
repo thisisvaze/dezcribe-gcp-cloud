@@ -1,4 +1,4 @@
-fastapi
+Flask
 pytest==8.3.2
 ffmpeg-python
 pydub
@@ -12,3 +12,4 @@ python-multipart
 uvicorn
 google-cloud-storage
 starlette
+flask-cors

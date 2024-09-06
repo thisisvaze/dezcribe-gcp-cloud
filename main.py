@@ -1,54 +1,59 @@
+from flask import Flask, request, jsonify, send_file, Response
+from werkzeug.utils import secure_filename
 import os
 import shutil
-from fastapi import FastAPI, Request, HTTPException, Response, UploadFile, File, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from google.cloud import storage
 from datetime import timedelta
-from fastapi.logger import logger
+import logging
 import asyncio
-from fastapi.responses import FileResponse, JSONResponse
 
 from util.Constants import BUCKET_NAME
 from util.gcs_bucket import download_from_gcs, download_multiple_from_gcs, upload_to_gcs
 from util.text_to_speech import main_function
 
+class VideoProcessRequest:
+    def __init__(self, video_path: str):
+        self.video_path = video_path
 
-class VideoProcessRequest(BaseModel):
-    video_path: str
+app = Flask(__name__)
 
-app = FastAPI()
+VIDDYSCRIBE_API_KEY = os.getenv("VIDDYSCRIBE_API_KEY")
 
 signed_urls = {}
 
 # Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Adjust this to your needs
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+from flask_cors import CORS
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-@app.post("/upload_video")
-async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+def verify_api_key():
+    api_key = request.headers.get("Authorization")
+    if not api_key or api_key != f"Bearer {VIDDYSCRIBE_API_KEY}":
+        return jsonify({"detail": "Invalid API Key"}), 403
+
+@app.route("/upload_video", methods=["POST"])
+def upload_video():
+    error_response = verify_api_key()
+    if error_response:
+        return error_response
+
     try:
-        file_location = f"/tmp/{file.filename}"
-        with open(file_location, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        file = request.files['file']
+        filename = secure_filename(file.filename)
+        file_location = f"/tmp/{filename}"
+        file.save(file_location)
         
-        gcs_url = upload_to_gcs(BUCKET_NAME, file_location, file.filename)
+        gcs_url = upload_to_gcs(BUCKET_NAME, file_location, filename)
 
         # Generate the output video name
-        output_video_name = os.path.splitext(file.filename)[0] + "_output.mp4"
+        output_video_name = os.path.splitext(filename)[0] + "_output.mp4"
 
         # Add the video processing task to the background
-        background_tasks.add_task(process_video_task, file_location, file.filename)
+        asyncio.run(process_video_task(file_location, filename))
         
-        return {"status": "processing", "gcs_url": gcs_url, "output_video_name": output_video_name}
+        return jsonify({"status": "processing", "gcs_url": gcs_url, "output_video_name": output_video_name})
     except Exception as e:
-        logger.error(f"Error in /upload_video: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        logging.error(f"Error in /upload_video: {e}")
+        return jsonify({"detail": "Internal Server Error"}), 500
 
 async def process_video_task(file_location: str, filename: str):
     try:
@@ -73,29 +78,28 @@ async def process_video_task(file_location: str, filename: str):
         )
         
         # Log the signed URL
-        logger.info(f"Signed URL: {signed_url}")
+        logging.info(f"Signed URL: {signed_url}")
         
         # Store the signed URL in the in-memory dictionary
         signed_urls[processed_video_filename] = signed_url
         
     except Exception as e:
-        logger.error(f"Error in process_video_task: {e}")
+        logging.error(f"Error in process_video_task: {e}")
 
-
-    
-@app.post("/process_video")
-async def process_video(request: VideoProcessRequest):
-    video_path = request.video_path
+@app.route("/process_video", methods=["POST"])
+async def process_video(request):
+    data = request.get_json()
+    video_path = data.get("video_path")
 
     if not video_path:
-        raise HTTPException(status_code=400, detail="video_path is required")
+        return jsonify({"detail": "video_path is required"}), 400
 
     result = await main_function(video_path)
     
-    return result
+    return jsonify(result)
 
-@app.get("/download_sample_videos")
-async def download_sample_videos():
+@app.route("/download_sample_videos", methods=["GET"])
+def download_sample_videos():
     bucket_name = BUCKET_NAME
     source_blob_names = ["sample_video1.mp4", "sample_video2.mp4"]
     ui_names = ["Battery", "Smoothie"]
@@ -114,13 +118,13 @@ async def download_sample_videos():
             )
             signed_urls.append({"name": ui_name, "url": signed_url})
         except Exception as e:
-            print(f"Error generating signed URL for {blob_name}: {e}")
-            raise HTTPException(status_code=500, detail=f"Error generating signed URL for {blob_name}")
+            logging.error(f"Error generating signed URL for {blob_name}: {e}")
+            return jsonify({"detail": f"Error generating signed URL for {blob_name}"}), 500
     
-    return signed_urls
+    return jsonify(signed_urls)
 
-@app.get("/serve_video/{video_name}")
-async def serve_video(video_name: str):
+@app.route("/serve_video/<video_name>", methods=["GET"])
+def serve_video(video_name: str):
     bucket_name = BUCKET_NAME
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
@@ -133,35 +137,34 @@ async def serve_video(video_name: str):
     
     blob_name = video_mapping.get(video_name)
     if not blob_name:
-        raise HTTPException(status_code=404, detail="Video not found")
+        return jsonify({"detail": "Video not found"}), 404
     
     blob = bucket.blob(blob_name)
     
     try:
         video_data = blob.download_as_bytes()
-        return Response(content=video_data, media_type="video/mp4")
+        return Response(video_data, mimetype="video/mp4")
     except Exception as e:
-        print(f"Error serving video {video_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error serving video {video_name}")
+        logging.error(f"Error serving video {video_name}: {e}")
+        return jsonify({"detail": f"Error serving video {video_name}"}), 500
 
-@app.get("/")
-async def hello_world():
+@app.route("/", methods=["GET"])
+def hello_world():
     name = os.environ.get("NAME", "World")
-    return {"message": f"Hello {name}!"}
+    return jsonify({"message": f"Hello {name}!"})
 
-@app.get("/download_video/{file_name}")
-async def download_video(file_name: str):
+@app.route("/download_video/<file_name>", methods=["GET"])
+def download_video(file_name: str):
     try:
         # Retrieve the signed URL from the in-memory dictionary
         signed_url = signed_urls.get(file_name)
         if not signed_url:
-            raise HTTPException(status_code=404, detail="File not found")
+            return jsonify({"detail": "File not found"}), 404
         
-        return {"signed_url": signed_url}
+        return jsonify({"signed_url": signed_url})
     except Exception as e:
-        logger.error(f"Error retrieving signed URL for {file_name}: {e}")
-        raise HTTPException(status_code=500, detail="Error retrieving signed URL")
+        logging.error(f"Error retrieving signed URL for {file_name}: {e}")
+        return jsonify({"detail": "Error retrieving signed URL"}), 500
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), log_level="debug")
+    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
