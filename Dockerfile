@@ -28,7 +28,7 @@ COPY . ./
 # COPY ./gckey.json /app/credentials.json
 
 # Set the environment variable to point to the credentials file.
-ENV GOOGLE_APPLICATION_CREDENTIALS=/gckey.json
+ENV GOOGLE_APPLICATION_CREDENTIALS=./gckey.json
 
 # Install production dependencies.
 RUN apt-get update && apt-get install -y ffmpeg && \
