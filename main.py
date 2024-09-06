@@ -51,24 +51,34 @@ def upload_video():
         output_video_name = os.path.splitext(filename)[0] + "_output.mp4"
 
         # Add the video processing task to the background
-        asyncio.run(process_video_task(file_location, filename))
+        asyncio.run(process_video_task(gcs_url))
         
         return jsonify({"status": "processing", "gcs_url": gcs_url, "output_video_name": output_video_name})
     except Exception as e:
         logging.error(f"Error in /upload_video: {e}")
         return jsonify({"detail": "Internal Server Error"}), 500
 
-async def process_video_task(file_location: str, filename: str):
+async def process_video_task(gcs_url: str):
     try:
         # Create a VideoProcessRequest object
-        request = VideoProcessRequest(video_path=file_location)
+        request = VideoProcessRequest(video_path=gcs_url)
         
         # Call your processing function here
         result = await process_video(request)
         
+        if not isinstance(result, dict) or 'status' not in result:
+            raise ValueError("Invalid result format from process_video")
+
+        if result['status'] == 'error':
+            logging.error(f"Error processing video: {result.get('message', 'Unknown error')}")
+            return
+
+        if 'output_url' not in result:
+            logging.error("No output_url in result")
+            return
+
         # Assuming the processed video is saved with a different name or in a different location
         processed_video_filename = os.path.basename(result["output_url"])
-        processed_video_location = f"/tmp/{processed_video_filename}"
         
         # Generate signed URL for the processed video
         bucket = storage_client.bucket(BUCKET_NAME)
@@ -86,19 +96,24 @@ async def process_video_task(file_location: str, filename: str):
         signed_urls[processed_video_filename] = signed_url
         
     except Exception as e:
-        logging.error(f"Error in process_video_task: {e}")
+        logging.error(f"Error in process_video_task: {str(e)}")
 
 @app.route("/process_video", methods=["POST"])
 async def process_video(request):
-    data = request.get_json()
-    video_path = data.get("video_path")
+    video_path = request.video_path
 
     if not video_path:
-        return jsonify({"detail": "video_path is required"}), 400
+        return jsonify({"status": "error", "message": "video_path is required"}), 400
 
-    result = await main_function(video_path)
+    try:
+        result = await main_function(video_path)
+        if not isinstance(result, dict):
+            raise ValueError("main_function did not return a dictionary")
+        return result
+    except Exception as e:
+        logging.error(f"Error in process_video: {str(e)}")
+        return {"status": "error", "message": str(e)}
     
-    return jsonify(result)
 
 @app.route("/download_sample_videos", methods=["GET"])
 def download_sample_videos():
