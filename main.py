@@ -6,7 +6,6 @@ from google.cloud import storage
 from datetime import timedelta
 import logging
 import asyncio
-
 from util.Constants import BUCKET_NAME
 from util.gcs_bucket import download_from_gcs, download_multiple_from_gcs, upload_to_gcs
 from util.text_to_speech import main_function
