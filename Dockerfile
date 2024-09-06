@@ -24,9 +24,6 @@ ENV APP_HOME /app
 WORKDIR $APP_HOME
 COPY . ./
 
-
-# Copy the .env file to the container
-COPY .env .env
 # Copy the Google Cloud credentials file to the container.
 COPY ./gckey.json /app/credentials.json
 

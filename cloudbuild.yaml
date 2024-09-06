@@ -20,6 +20,15 @@ steps:
     args: ["install", "-r", "requirements.txt", "--user"]
 # [END cloudbuild_python_dependencies_yaml]
 
+  # Access secrets from Google Secret Manager
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud secrets versions access latest --secret=MY_ENV_SECRET > .env
+        gcloud secrets versions access latest --secret=MY_GC_KEY_SECRET > gckey.json
+
   # [START cloudbuild_python_tests_yaml]
   # Run unit tests
   - name: python
