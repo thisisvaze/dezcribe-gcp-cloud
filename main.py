@@ -7,20 +7,12 @@ from datetime import timedelta
 import logging
 import asyncio
 from util.Constants import BUCKET_NAME
-from util.gcs_bucket import download_from_gcs, download_multiple_from_gcs, upload_to_gcs
+from util.gcs_bucket import download_from_gcs, download_multiple_from_gcs, upload_to_gcs, get_storage_client
 from util.text_to_speech import main_function
 import json
 from google.oauth2 import service_account
 
-# Load the Google Cloud key JSON from the environment variable
-gc_key_json = os.getenv("MY_GC_KEY_SECRET")
-if gc_key_json:
-    gc_key_dict = json.loads(gc_key_json)
-    credentials = service_account.Credentials.from_service_account_info(gc_key_dict)
-    storage_client = storage.Client(credentials=credentials)
-else:
-    logging.error("Google Cloud key JSON not found in environment variable MY_GC_KEY_SECRET")
-    storage_client = storage.Client() 
+storage_client = get_storage_client()
 
 class VideoProcessRequest:
     def __init__(self, video_path: str):
@@ -79,7 +71,6 @@ async def process_video_task(file_location: str, filename: str):
         processed_video_location = f"/tmp/{processed_video_filename}"
         
         # Generate signed URL for the processed video
-        storage_client = storage.Client()
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(processed_video_filename)
         signed_url = blob.generate_signed_url(
@@ -116,7 +107,6 @@ def download_sample_videos():
     ui_names = ["Battery", "Smoothie"]
     
     signed_urls = []
-    storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     
     for blob_name, ui_name in zip(source_blob_names, ui_names):
@@ -137,7 +127,6 @@ def download_sample_videos():
 @app.route("/serve_video/<video_name>", methods=["GET"])
 def serve_video(video_name: str):
     bucket_name = BUCKET_NAME
-    storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     
     # Mapping of UI names to blob names
