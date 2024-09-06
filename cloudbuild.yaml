@@ -15,10 +15,7 @@
 # [START cloudbuild_python_dependencies_yaml]
 
 steps:
-  # Install dependencies
-  - name: python
-    entrypoint: pip
-    args: ["install", "-r", "requirements.txt", "--user"]
+  # ... existing steps ...
 
   # Access secrets from Google Secret Manager
   - name: 'gcr.io/cloud-builders/gcloud'
@@ -28,6 +25,14 @@ steps:
       - |
         gcloud secrets versions access latest --secret=MY_ENV_SECRET > .env
         gcloud secrets versions access latest --secret=MY_GC_KEY_SECRET > /workspace/gckey.json
+
+  # Set the GOOGLE_APPLICATION_CREDENTIALS environment variable
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        export GOOGLE_APPLICATION_CREDENTIALS=/workspace/gckey.json
 
   # Run unit tests
   - name: python

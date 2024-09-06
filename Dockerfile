@@ -24,9 +24,6 @@ ENV APP_HOME /app
 WORKDIR $APP_HOME
 COPY . ./
 
-# Copy the Google Cloud credentials file to the container.
-# COPY ./gckey.json /app/credentials.json
-
 
 # Install production dependencies.
 RUN apt-get update && apt-get install -y ffmpeg && \
