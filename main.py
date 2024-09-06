@@ -9,6 +9,18 @@ import asyncio
 from util.Constants import BUCKET_NAME
 from util.gcs_bucket import download_from_gcs, download_multiple_from_gcs, upload_to_gcs
 from util.text_to_speech import main_function
+import json
+from google.oauth2 import service_account
+
+# Load the Google Cloud key JSON from the environment variable
+gc_key_json = os.getenv("MY_GC_KEY_SECRET")
+if gc_key_json:
+    gc_key_dict = json.loads(gc_key_json)
+    credentials = service_account.Credentials.from_service_account_info(gc_key_dict)
+    storage_client = storage.Client(credentials=credentials)
+else:
+    logging.error("Google Cloud key JSON not found in environment variable MY_GC_KEY_SECRET")
+    storage_client = storage.Client() 
 
 class VideoProcessRequest:
     def __init__(self, video_path: str):
