@@ -25,7 +25,7 @@ WORKDIR $APP_HOME
 COPY . ./
 
 # Copy the Google Cloud credentials file to the container.
-COPY ./gckey.json /app/credentials.json
+# COPY ./gckey.json /app/credentials.json
 
 # Set the environment variable to point to the credentials file.
 ENV GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
