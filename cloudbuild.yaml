@@ -27,7 +27,7 @@ steps:
       - '-c'
       - |
         gcloud secrets versions access latest --secret=MY_ENV_SECRET > .env
-        gcloud secrets versions access latest --secret=MY_GC_KEY_SECRET > gckey.json
+        gcloud secrets versions access latest --secret=MY_GC_KEY_SECRET > /workspace/gckey.json
 
   # Run unit tests
   - name: python
@@ -51,7 +51,7 @@ steps:
            '--allow-unauthenticated',
            '--set-secrets', 'MY_ENV_SECRET=projects/${PROJECT_ID}/secrets/MY_ENV_SECRET:latest',
            '--set-secrets', 'MY_GC_KEY_SECRET=projects/${PROJECT_ID}/secrets/MY_GC_KEY_SECRET:latest',
-           '--set-env-vars', 'GOOGLE_APPLICATION_CREDENTIALS=/app/gckey.json']
+           '--set-env-vars', 'GOOGLE_APPLICATION_CREDENTIALS=/workspace/gckey.json'] 
 
 # Save test logs to Google Cloud Storage
 artifacts:
