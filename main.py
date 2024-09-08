@@ -15,8 +15,9 @@ from google.oauth2 import service_account
 storage_client = get_storage_client()
 
 class VideoProcessRequest:
-    def __init__(self, video_path: str):
+    def __init__(self, video_path: str, add_bg_music: bool):
         self.video_path = video_path
+        self.add_bg_music = add_bg_music
 
 app = Flask(__name__)
 
@@ -40,6 +41,7 @@ def upload_video():
         return error_response
 
     try:
+        add_bg_music = request.form.get('add_bg_music') 
         file = request.files['file']
         filename = secure_filename(file.filename)
         file_location = f"/tmp/{filename}"
@@ -51,17 +53,17 @@ def upload_video():
         output_video_name = os.path.splitext(filename)[0] + "_output.mp4"
 
         # Add the video processing task to the background
-        asyncio.run(process_video_task(gcs_url))
+        asyncio.run(process_video_task(gcs_url, add_bg_music))
         
         return jsonify({"status": "processing", "gcs_url": gcs_url, "output_video_name": output_video_name})
     except Exception as e:
         logging.error(f"Error in /upload_video: {e}")
         return jsonify({"detail": "Internal Server Error"}), 500
 
-async def process_video_task(gcs_url: str):
+async def process_video_task(gcs_url: str, add_bg_music: str):
     try:
         # Create a VideoProcessRequest object
-        request = VideoProcessRequest(video_path=gcs_url)
+        request = VideoProcessRequest(video_path=gcs_url, add_bg_music= add_bg_music)
         
         # Call your processing function here
         result = await process_video(request)
@@ -106,7 +108,7 @@ async def process_video(request):
         return jsonify({"status": "error", "message": "video_path is required"}), 400
 
     try:
-        result = await main_function(video_path)
+        result = await main_function(video_path, request.add_bg_music)
         if not isinstance(result, dict):
             raise ValueError("main_function did not return a dictionary")
         return result

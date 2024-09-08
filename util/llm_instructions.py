@@ -144,6 +144,13 @@ For eg. [0:02.100] Description here. \n[0:08.250] Description here. \n[0:10.100]
 Do not reply any extra text surrounding it. Here is the given timestamps. If the below text doesn't appear to have timestamps, don't force it. Just reply no timestamps returned from Gemini.
 """
 
+instructions_choose_category = """
+Choose exactly one of the categoies from Ambient, BossaNova, Chillwave, Cinematic, Corporate, Country, Dubstep, EDM, Folk, FutureBass, FutureGarage, HipHop, House, IndiePop, IndieRock, Jazz, LatinPop, LoFi, R&B, Samba, Synthwave, Trap for the
+audio for the given video. Strictly Reply in JSON format with the following schema
+
+{"category": "category name" }
+"""
+
 # instructions_silent_period = """You are an AI assistant specialized in creating audio description timestamps for videos. Your task is to analyze audio and generate precise timestamps for periods without language in audio. Follow these guidelines:
 
 # 1. Silence Identification:

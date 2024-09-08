@@ -1,3 +1,4 @@
+import json
 import re
 import logging
 from asyncio import Semaphore
@@ -8,8 +9,9 @@ import uuid
 from util.Constants import BUCKET_NAME
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
 import azure.cognitiveservices.speech as speechsdk
+from util.bgaudio import BackgroundAudioGenerator
 from util.gcs_bucket import upload_to_gcs, download_from_gcs
-from util.llm_instructions import insturctions_combined_format, instructions_timestamp_format
+from util.llm_instructions import insturctions_combined_format, instructions_timestamp_format, instructions_choose_category
 import datetime
 import os
 import asyncio
@@ -51,16 +53,27 @@ async def tts_utility(model_name, text, filename):
 
 async def text_to_wav_elevenlabs(voice_id: str, text: str, filename: str):
     client = AsyncElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
-    
-    audio_generator = await client.generate(
-        text=text,
-        voice=voice_id,
-        model="eleven_turbo_v2_5"
-    )
-    with open(filename, "wb") as f:
-        async for chunk in audio_generator:
-            f.write(chunk)
-    print(f'Generated speech saved to "{filename}"')
+    max_retries = 3
+    retry_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            audio_generator = await client.generate(
+                text=text,
+                voice=voice_id,
+                model="eleven_turbo_v2_5"
+            )
+            with open(filename, "wb") as f:
+                async for chunk in audio_generator:
+                    f.write(chunk)
+            logging.info(f'Generated speech saved to "{filename}"')
+            return  # Exit the function if successful
+        except Exception as e:
+            logging.error(f"Error generating WAV file on attempt {attempt + 1} for text: '{text}' - {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay)
+            else:
+                raise
 
 async def generate_wav_files_from_response(response_body: dict, model_name: str, unique_id: str):
     description = response_body["description"]
@@ -74,7 +87,7 @@ async def generate_wav_files_from_response(response_body: dict, model_name: str,
 
     timestamp_ranges = []
     tasks = []
-    semaphore = Semaphore(10)
+    semaphore = Semaphore(3)
 
     async def limited_tts_utility(model_name, text, filename):
         async with semaphore:
@@ -136,7 +149,7 @@ async def generate_wav_files_from_response(response_body: dict, model_name: str,
     logging.info(f"Generated timestamp ranges: {timestamp_ranges}")
     return timestamp_ranges
 
-def get_audio_desc_util(video_path):
+def get_audio_desc_util(video_path, add_bg_music):
     v = VertexAIUtility()
     
     if not v.validate_video(video_path):
@@ -144,8 +157,20 @@ def get_audio_desc_util(video_path):
         return {"error": "Invalid video file"}
 
     response_audio_desc = v.get_info_from_video(video_path, insturctions_combined_format)
+    if add_bg_music:
+        bg_audio_response = v.get_info_from_video(video_path, instructions_choose_category)["description"]
+        try:
+            # Strip the code block markers and parse the JSON
+            bg_audio_response = bg_audio_response.strip('```json').strip('```').strip()
+            bg_audio_category = json.loads(bg_audio_response)["category"]
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to decode JSON from bg_audio_response: {e}")
+            raise
+    else:
+        bg_audio_category = None
+
     reformmated_desc = v.gemini_llm(prompt=response_audio_desc["description"], inst=instructions_timestamp_format)
-    return reformmated_desc
+    return reformmated_desc, bg_audio_category
 
 def convert_mp4_to_wav(video_path):
     logging.info(f"Converting video to audio: {video_path}")
@@ -190,7 +215,7 @@ def convert_mp4_to_wav(video_path):
 
     return audio_path
 
-async def main_function(gcs_url):
+async def main_function(gcs_url, add_bg_music):
     output_path = os.path.splitext(gcs_url)[0] + "_output.mp4"
     try:
         unique_id = uuid.uuid4()
@@ -205,7 +230,7 @@ async def main_function(gcs_url):
         logging.error(f"Error loading video: {e}")
         return {"status": "error", "message": str(e)}
     
-    response_audio_desc = get_audio_desc_util(video_path)
+    response_audio_desc, bg_audio_category = get_audio_desc_util(video_path, add_bg_music)
     if "error" in response_audio_desc:
         logging.error(f"Error in Gemini response: {response_audio_desc['error']}")
         return {"status": "error", "message": response_audio_desc["error"]}
@@ -214,7 +239,7 @@ async def main_function(gcs_url):
         "description": response_audio_desc["description"],
     }
     try:
-        await create_final_video_v2(video_path, response_body, output_path, "ElevenLabs", unique_id)
+        await create_final_video_v2(video_path, bg_audio_category, response_body, output_path, "ElevenLabs", unique_id, add_bg_music)
     except ValueError as e:
         logging.error(f"Error during video processing: {e}")
         return {"status": "error", "message": str(e)}
@@ -243,8 +268,11 @@ async def main_function(gcs_url):
     
     return {"status": "success", "output_url": gcs_url}
 
-async def create_final_video_v2(video_path: str, response_body: dict, output_path: str, model_name, unique_id: str):
+async def create_final_video_v2(video_path: str, bg_audio_category: str, response_body: dict, output_path: str, model_name, unique_id: str, add_bg_music : str):
     logging.info(f"Starting create_final_video_v2 with video_path: {video_path}, output_path: {output_path}, model_name: {model_name}")
+
+    if add_bg_music and bg_audio_category:
+        bg_audio_generator = BackgroundAudioGenerator(bg_audio_category)
     
     original_videos_audio = convert_mp4_to_wav(video_path)
     if original_videos_audio is None:
@@ -320,18 +348,52 @@ async def create_final_video_v2(video_path: str, response_body: dict, output_pat
                 still_frame_volume = original_audio_clip.subclip(max(ts_start_seconds - 5, 0), e_time).max_volume()
                 logging.info(f"Calculated volumes: vid_max_volume={vid_max_volume}, max_audio_desc_volume={max_audio_desc_volume}, still_frame_volume={still_frame_volume}")
 
-                still_frame_volume = original_audio_clip.subclip(max(ts_start_seconds - 5, 0), e_time).max_volume()
-                combined_audio_clips = [still_clip.audio.volumex(vid_max_volume/max_audio_desc_volume)]
-                if ts_start_seconds + bg_fade_duration < int(original_audio_clip.duration):
-                    logging.info(f"Fading out start audio original track from {ts_start_seconds} to {ts_start_seconds + bg_fade_duration}")
-                    faded_out_start_audio_original_track = original_audio_clip.subclip(ts_start_seconds, ts_start_seconds + bg_fade_duration).audio_fadeout(bg_fade_duration)
-                    combined_audio_clips.append(faded_out_start_audio_original_track.set_start(0))
-                if ts_start_seconds > bg_fade_duration:
-                    logging.info(f"Fading in end audio original track from {ts_start_seconds - bg_fade_duration} to {ts_start_seconds}")
-                    faded_in_end_audio_original_track = original_audio_clip.subclip(ts_start_seconds - bg_fade_duration, ts_start_seconds).audio_fadein(bg_fade_duration)
-                    combined_audio_clips.append(faded_in_end_audio_original_track.set_start(audio_clip.duration - bg_fade_duration))
+                
+                if add_bg_music and bg_audio_category:
+                    temp_audio_path = f"{unique_id}_temp_audio_{uuid.uuid2}.wav" 
+                    subclip = original_audio_clip.subclip(max(ts_start_seconds - 10, 0), e_time)
+                    subclip.write_audiofile(temp_audio_path)
+                    subclip_for_musicgen = AudioFileClip(temp_audio_path)
+                    logging.info(f"Generated temporary audio file for background music: {subclip_for_musicgen.filename}")
+                    
+                    music_path = bg_audio_generator.generate_music_from_collection(
+                        duration=int(audio_clip.duration)
+                    )
+                    logging.info(f"Generated background music: {music_path}")
 
-                combined_audio = CompositeAudioClip(combined_audio_clips)
+                    generated_music_clip = AudioFileClip(music_path)
+                    generated_music_clip_max_volume = generated_music_clip.max_volume()
+                    generated_music_clip = generated_music_clip.volumex((vid_max_volume/generated_music_clip_max_volume)*0.5).audio_fadein(fade_duration).volumex(0.12).audio_fadeout(fade_duration).volumex((vid_max_volume/generated_music_clip_max_volume)*3)
+                    
+                    combined_audio_clips = [still_clip.audio.volumex(vid_max_volume/max_audio_desc_volume), generated_music_clip.set_start(0)]
+                    if ts_start_seconds + bg_fade_duration < int(original_audio_clip.duration):
+                        logging.info(f"Fading out start audio original track from {ts_start_seconds} to {ts_start_seconds + bg_fade_duration}")
+                        faded_out_start_audio_original_track = original_audio_clip.subclip(ts_start_seconds, ts_start_seconds + bg_fade_duration).audio_fadeout(bg_fade_duration)
+                        combined_audio_clips.append(faded_out_start_audio_original_track.set_start(0))
+                    if ts_start_seconds > bg_fade_duration:
+                        logging.info(f"Fading in end audio original track from {ts_start_seconds - bg_fade_duration} to {ts_start_seconds}")
+                        faded_in_end_audio_original_track = original_audio_clip.subclip(ts_start_seconds - bg_fade_duration, ts_start_seconds).audio_fadein(bg_fade_duration)
+                        combined_audio_clips.append(faded_in_end_audio_original_track.set_start(audio_clip.duration - bg_fade_duration))
+
+                    combined_audio = CompositeAudioClip(combined_audio_clips)
+
+                else:
+
+                    still_frame_volume = original_audio_clip.subclip(max(ts_start_seconds - 5, 0), e_time).max_volume()
+                    combined_audio_clips = [still_clip.audio.volumex(vid_max_volume/max_audio_desc_volume)]
+                    if ts_start_seconds + bg_fade_duration < int(original_audio_clip.duration):
+                        logging.info(f"Fading out start audio original track from {ts_start_seconds} to {ts_start_seconds + bg_fade_duration}")
+                        faded_out_start_audio_original_track = original_audio_clip.subclip(ts_start_seconds, ts_start_seconds + bg_fade_duration).audio_fadeout(bg_fade_duration)
+                        combined_audio_clips.append(faded_out_start_audio_original_track.set_start(0))
+                    if ts_start_seconds > bg_fade_duration:
+                        logging.info(f"Fading in end audio original track from {ts_start_seconds - bg_fade_duration} to {ts_start_seconds}")
+                        faded_in_end_audio_original_track = original_audio_clip.subclip(ts_start_seconds - bg_fade_duration, ts_start_seconds).audio_fadein(bg_fade_duration)
+                        combined_audio_clips.append(faded_in_end_audio_original_track.set_start(audio_clip.duration - bg_fade_duration))
+
+                    
+                    combined_audio = CompositeAudioClip(combined_audio_clips)
+                
+
                 still_clip = still_clip.set_audio(combined_audio)
                 logging.info(f"Set combined audio for still clip")
             
