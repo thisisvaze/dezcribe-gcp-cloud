@@ -350,7 +350,7 @@ async def create_final_video_v2(video_path: str, bg_audio_category: str, respons
 
                 
                 if add_bg_music and bg_audio_category:
-                    temp_audio_path = f"{unique_id}_temp_audio_{uuid.uuid2}.wav" 
+                    temp_audio_path = f"{unique_id}_temp_audio_{uuid.uuid4()}.wav" 
                     subclip = original_audio_clip.subclip(max(ts_start_seconds - 10, 0), e_time)
                     subclip.write_audiofile(temp_audio_path)
                     subclip_for_musicgen = AudioFileClip(temp_audio_path)
