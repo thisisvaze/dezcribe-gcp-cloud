@@ -335,7 +335,7 @@ async def create_final_video_v2(video_path: str, bg_audio_category: str, respons
             logging.info(f"Created still clip with duration: {audio_clip.duration}")
 
             if ts_start_seconds == 0: 
-                e_time = ts_start_seconds + 10 
+                e_time = ts_start_seconds + 5 
             else:
                 e_time = ts_start_seconds
 
@@ -350,12 +350,6 @@ async def create_final_video_v2(video_path: str, bg_audio_category: str, respons
 
                 
                 if add_bg_music and bg_audio_category:
-                    temp_audio_path = f"{unique_id}_temp_audio_{uuid.uuid4()}.wav" 
-                    subclip = original_audio_clip.subclip(max(ts_start_seconds - 10, 0), e_time)
-                    subclip.write_audiofile(temp_audio_path)
-                    subclip_for_musicgen = AudioFileClip(temp_audio_path)
-                    logging.info(f"Generated temporary audio file for background music: {subclip_for_musicgen.filename}")
-                    
                     music_path = bg_audio_generator.generate_music_from_collection(
                         duration=int(audio_clip.duration)
                     )
@@ -401,7 +395,7 @@ async def create_final_video_v2(video_path: str, bg_audio_category: str, respons
             logging.info(f"Added still clip to clips")
 
         added_timestamps.add(start_timestamp)
-        last_end = still_frame_time if still_frame_time is not None else insertion_time + audio_clip.duration
+        last_end = still_frame_time
         logging.info(f"Updated last_end to {last_end}")
 
     if last_end < int(video.duration):

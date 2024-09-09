@@ -24,8 +24,10 @@ class BackgroundAudioGenerator():
         end_time = start_time + duration
 
         if end_time > audio_clip.duration:
-            end_time = audio_clip.duration
-            self.current_position = 0  # Reset to loop back
+            # Reset to start from 0 to duration
+            start_time = 0
+            end_time = duration
+            self.current_position = duration  # Update position to duration
         else:
             self.current_position = end_time
 

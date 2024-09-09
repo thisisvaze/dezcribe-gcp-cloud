@@ -11,6 +11,7 @@ from util.gcs_bucket import download_from_gcs, download_multiple_from_gcs, uploa
 from util.text_to_speech import main_function
 import json
 from google.oauth2 import service_account
+processing_status = {}
 
 storage_client = get_storage_client()
 
@@ -34,6 +35,11 @@ def verify_api_key():
     if not api_key or api_key != f"Bearer {VIDDYSCRIBE_API_KEY}":
         return jsonify({"detail": "Invalid API Key"}), 403
 
+
+from concurrent.futures import ThreadPoolExecutor
+
+executor = ThreadPoolExecutor()
+
 @app.route("/upload_video", methods=["POST"])
 def upload_video():
     error_response = verify_api_key()
@@ -49,23 +55,21 @@ def upload_video():
         
         gcs_url = upload_to_gcs(BUCKET_NAME, file_location, filename)
 
-        # Generate the output video name
         output_video_name = os.path.splitext(filename)[0] + "_output.mp4"
+        processing_status[output_video_name] = "Processing video... This may take upto 5 minutes. Keep this tab open."
 
-        # Add the video processing task to the background
-        asyncio.run(process_video_task(gcs_url, add_bg_music))
+        # Schedule the task in a separate thread
+        executor.submit(asyncio.run, process_video_task(gcs_url, add_bg_music, output_video_name))
         
         return jsonify({"status": "processing", "gcs_url": gcs_url, "output_video_name": output_video_name})
     except Exception as e:
         logging.error(f"Error in /upload_video: {e}")
         return jsonify({"detail": "Internal Server Error"}), 500
 
-async def process_video_task(gcs_url: str, add_bg_music: str):
+
+async def process_video_task(gcs_url: str, add_bg_music: str, output_video_name: str):
     try:
-        # Create a VideoProcessRequest object
-        request = VideoProcessRequest(video_path=gcs_url, add_bg_music= add_bg_music)
-        
-        # Call your processing function here
+        request = VideoProcessRequest(video_path=gcs_url, add_bg_music=add_bg_music)
         result = await process_video(request)
         
         if not isinstance(result, dict) or 'status' not in result:
@@ -73,32 +77,34 @@ async def process_video_task(gcs_url: str, add_bg_music: str):
 
         if result['status'] == 'error':
             logging.error(f"Error processing video: {result.get('message', 'Unknown error')}")
+            processing_status[output_video_name] = "Error processing video"
             return
 
         if 'output_url' not in result:
             logging.error("No output_url in result")
+            processing_status[output_video_name] = "Error processing video"
             return
 
-        # Assuming the processed video is saved with a different name or in a different location
         processed_video_filename = os.path.basename(result["output_url"])
-        
-        # Generate signed URL for the processed video
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(processed_video_filename)
         signed_url = blob.generate_signed_url(
             version="v4",
-            expiration=timedelta(minutes=15),  # URL valid for 15 minutes
+            expiration=timedelta(minutes=15),
             method="GET"
         )
         
-        # Log the signed URL
-        logging.info(f"Signed URL: {signed_url}")
-        
-        # Store the signed URL in the in-memory dictionary
         signed_urls[processed_video_filename] = signed_url
+        processing_status[output_video_name] = "Processing completed"
         
     except Exception as e:
         logging.error(f"Error in process_video_task: {str(e)}")
+        processing_status[output_video_name] = "Error processing video"
+
+@app.route("/update_status/<output_video_name>", methods=["GET"])
+def update_status(output_video_name: str):
+    status = processing_status.get(output_video_name, "Processing video. This may take upto 5 minutes. Keep this tab open.")
+    return jsonify({"status": status})
 
 @app.route("/process_video", methods=["POST"])
 async def process_video(request):
