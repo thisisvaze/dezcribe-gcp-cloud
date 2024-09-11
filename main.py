@@ -16,7 +16,7 @@ processing_status = {}
 storage_client = get_storage_client()
 
 class VideoProcessRequest:
-    def __init__(self, video_path: str, add_bg_music: bool):
+    def __init__(self, video_path: str, add_bg_music: str):
         self.video_path = video_path
         self.add_bg_music = add_bg_music
 
@@ -47,7 +47,8 @@ def upload_video():
         return error_response
 
     try:
-        add_bg_music = request.form.get('add_bg_music') 
+        add_bg_music = True if request.form.get('add_bg_music') == "true" else False
+        print("Add bg music:"+str(add_bg_music))
         file = request.files['file']
         filename = secure_filename(file.filename)
         file_location = f"/tmp/{filename}"

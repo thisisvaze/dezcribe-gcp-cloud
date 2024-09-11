@@ -24,7 +24,6 @@ ENV APP_HOME /app
 WORKDIR $APP_HOME
 COPY . ./
 
-
 # Install production dependencies.
 RUN apt-get update && apt-get install -y ffmpeg && \
     pip install -r requirements.txt
