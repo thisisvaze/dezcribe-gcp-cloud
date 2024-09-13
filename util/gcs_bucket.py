@@ -16,6 +16,12 @@ def get_storage_client():
         return storage.Client()
 
 
+# Add this new function to delete files from GCS
+def delete_from_gcs(bucket_name, blob_name):
+    storage_client = get_storage_client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.delete()
 
 def upload_to_gcs(bucket_name, source_file_name, destination_blob_name):
     storage_client = get_storage_client()

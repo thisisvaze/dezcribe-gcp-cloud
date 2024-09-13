@@ -22,6 +22,10 @@ class VideoProcessRequest:
 
 app = Flask(__name__)
 
+# Add this configuration to increase the maximum content length
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
+
+
 VIDDYSCRIBE_API_KEY = os.getenv("VIDDYSCRIBE_API_KEY")
 
 signed_urls = {}
@@ -55,6 +59,9 @@ def upload_video():
         file.save(file_location)
         
         gcs_url = upload_to_gcs(BUCKET_NAME, file_location, filename)
+
+         # Clean up the temporary file
+        os.remove(file_location)
 
         output_video_name = os.path.splitext(filename)[0] + "_output.mp4"
         processing_status[output_video_name] = "Processing video... This may take upto 5 minutes. Keep this tab open."
