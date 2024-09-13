@@ -283,6 +283,15 @@ async def create_final_video_v2(video_path: str, bg_audio_category: str, respons
         original_audio_clip = AudioFileClip(original_videos_audio)
         logging.info(f"Loaded original audio clip with duration: {original_audio_clip.duration}")
 
+    if original_audio_clip is None:
+        video = VideoFileClip(video_path)
+        blank_audio = AudioSegment.silent(duration=video.duration * 1000)  # duration in milliseconds
+        blank_audio_path = f"temp/{unique_id}_blank_audio.wav"
+        blank_audio.export(blank_audio_path, format="wav")
+        original_audio_clip = AudioFileClip(blank_audio_path).set_start(0)
+        logging.info(f"Created blank audio clip with duration: {original_audio_clip.duration}")
+
+
     response_audio_timestamps = await generate_wav_files_from_response(response_body, model_name, unique_id)
     if not response_audio_timestamps:
         logging.error("Failed to generate response audio timestamps")
@@ -343,11 +352,13 @@ async def create_final_video_v2(video_path: str, bg_audio_category: str, respons
             bg_fade_duration = 0.2
             if original_audio_clip:
                 vid_max_volume = original_audio_clip.max_volume()
-                max_audio_desc_volume = audio_clip.max_volume()
-                ratio_scale = vid_max_volume/max_audio_desc_volume
                 still_frame_volume = original_audio_clip.subclip(max(ts_start_seconds - 5, 0), e_time).max_volume()
+                if vid_max_volume == 0:
+                    vid_max_volume = audio_clip.max_volume()
+                    still_frame_volume = vid_max_volume
+                max_audio_desc_volume = audio_clip.max_volume()
+                
                 logging.info(f"Calculated volumes: vid_max_volume={vid_max_volume}, max_audio_desc_volume={max_audio_desc_volume}, still_frame_volume={still_frame_volume}")
-
                 
                 if add_bg_music and bg_audio_category:
                     music_path = bg_audio_generator.generate_music_from_collection(
@@ -372,8 +383,6 @@ async def create_final_video_v2(video_path: str, bg_audio_category: str, respons
                     combined_audio = CompositeAudioClip(combined_audio_clips)
 
                 else:
-
-                    still_frame_volume = original_audio_clip.subclip(max(ts_start_seconds - 5, 0), e_time).max_volume()
                     combined_audio_clips = [still_clip.audio.volumex(vid_max_volume/max_audio_desc_volume)]
                     if ts_start_seconds + bg_fade_duration < int(original_audio_clip.duration):
                         logging.info(f"Fading out start audio original track from {ts_start_seconds} to {ts_start_seconds + bg_fade_duration}")
