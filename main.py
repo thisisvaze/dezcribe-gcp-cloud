@@ -3,6 +3,7 @@ from werkzeug.utils import secure_filename
 import os
 import shutil
 from google.cloud import storage
+import datetime
 from datetime import timedelta
 import logging
 import asyncio
@@ -24,6 +25,8 @@ app = Flask(__name__)
 
 # Add this configuration to increase the maximum content length
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
+
+
 
 
 VIDDYSCRIBE_API_KEY = os.getenv("VIDDYSCRIBE_API_KEY")
@@ -77,6 +80,7 @@ def upload_video():
 
 async def process_video_task(gcs_url: str, add_bg_music: str, output_video_name: str):
     try:
+        logging.info(f"Starting to process video: {gcs_url}")
         request = VideoProcessRequest(video_path=gcs_url, add_bg_music=add_bg_music)
         result = await process_video(request)
         
@@ -104,10 +108,78 @@ async def process_video_task(gcs_url: str, add_bg_music: str, output_video_name:
         
         signed_urls[processed_video_filename] = signed_url
         processing_status[output_video_name] = "Processing completed"
+        logging.info(f"Video processing completed: {output_video_name}")
         
     except Exception as e:
         logging.error(f"Error in process_video_task: {str(e)}")
         processing_status[output_video_name] = "Error processing video"
+
+@app.route("/start_processing", methods=["POST"])
+def start_processing():
+    error_response = verify_api_key()
+    if error_response:
+        return error_response
+
+    try:
+        data = request.json
+        filename = data.get('filename')
+        add_bg_music = data.get('add_bg_music', False)
+
+        if not filename:
+            return jsonify({"error": "Filename is required"}), 400
+
+        # Remove the gs:// prefix if it exists
+        gcs_url = filename if not filename.startswith('gs://') else filename[5:]
+        output_video_name = os.path.splitext(filename)[0] + "_output.mp4"
+        processing_status[output_video_name] = "Processing video... This may take up to 5 minutes. Keep this tab open."
+
+        # Schedule the task in a separate thread
+        executor.submit(asyncio.run, process_video_task(gcs_url, add_bg_music, output_video_name))
+        
+        return jsonify({"status": "processing", "output_video_name": output_video_name})
+    except Exception as e:
+        logging.error(f"Error in /start_processing: {e}")
+        return jsonify({"error": "Internal Server Error"}), 500
+    
+    
+@app.route("/get_upload_url", methods=["POST"])
+def get_upload_url():
+    error_response = verify_api_key()
+    if error_response:
+        return error_response
+
+    try:
+        data = request.json
+        if not data:
+            logging.error("No JSON data in request")
+            return jsonify({"error": "No data provided"}), 400
+
+        filename = data.get('filename')
+        content_type = data.get('contentType')
+        
+        logging.info(f"Received request for upload URL. Filename: {filename}, Content-Type: {content_type}")
+        
+        if not filename or not content_type:
+            logging.error(f"Missing filename or content_type. Filename: {filename}, Content-Type: {content_type}")
+            return jsonify({"error": "Filename and content type are required"}), 400
+
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(filename)
+
+        # Generate a signed URL for uploading
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(minutes=15),
+            method="PUT",
+            content_type=content_type,
+        )
+
+        logging.info(f"Generated signed URL for {filename}")
+        return jsonify({"upload_url": url})
+    except Exception as e:
+        logging.error(f"Error generating upload URL: {str(e)}")
+        return jsonify({"error": "Internal Server Error", "details": str(e)}), 500
+
 
 @app.route("/update_status/<output_video_name>", methods=["GET"])
 def update_status(output_video_name: str):
