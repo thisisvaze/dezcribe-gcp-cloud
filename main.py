@@ -24,7 +24,7 @@ class VideoProcessRequest:
 app = Flask(__name__)
 
 # Add this configuration to increase the maximum content length
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB
 
 
 
@@ -67,7 +67,7 @@ def upload_video():
         os.remove(file_location)
 
         output_video_name = os.path.splitext(filename)[0] + "_output.mp4"
-        processing_status[output_video_name] = "Processing video... This may take upto 5 minutes. Keep this tab open."
+        processing_status[output_video_name] = "Processing video... This may take 4-10 minutes. Keep this tab open."
 
         # Schedule the task in a separate thread
         executor.submit(asyncio.run, process_video_task(gcs_url, add_bg_music, output_video_name))
@@ -131,7 +131,7 @@ def start_processing():
         # Remove the gs:// prefix if it exists
         gcs_url = filename if not filename.startswith('gs://') else filename[5:]
         output_video_name = os.path.splitext(filename)[0] + "_output.mp4"
-        processing_status[output_video_name] = "Processing video... This may take up to 5 minutes. Keep this tab open."
+        processing_status[output_video_name] = "Processing video... This may take 4-10 minutes. Keep this tab open."
 
         # Schedule the task in a separate thread
         executor.submit(asyncio.run, process_video_task(gcs_url, add_bg_music, output_video_name))
@@ -183,7 +183,7 @@ def get_upload_url():
 
 @app.route("/update_status/<output_video_name>", methods=["GET"])
 def update_status(output_video_name: str):
-    status = processing_status.get(output_video_name, "Processing video. This may take upto 5 minutes. Keep this tab open.")
+    status = processing_status.get(output_video_name, "Processing video. This may take 4-10 minutes. Keep this tab open.")
     return jsonify({"status": status})
 
 @app.route("/process_video", methods=["POST"])
@@ -251,10 +251,6 @@ def serve_video(video_name: str):
         logging.error(f"Error serving video {video_name}: {e}")
         return jsonify({"detail": f"Error serving video {video_name}"}), 500
 
-@app.route("/", methods=["GET"])
-def hello_world():
-    name = os.environ.get("NAME", "World")
-    return jsonify({"message": f"Hello {name}!"})
 
 @app.route("/download_video/<file_name>", methods=["GET"])
 def download_video(file_name: str):
