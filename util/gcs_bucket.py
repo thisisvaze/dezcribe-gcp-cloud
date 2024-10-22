@@ -5,15 +5,28 @@ import json
 from google.oauth2 import service_account
 from urllib.parse import unquote
 
+def get_environment():
+    return os.getenv('ENVIRONMENT', 'development')
+
+
 def get_storage_client():
-    gc_key_json = os.getenv("MY_GC_KEY_SECRET")
-    if gc_key_json:
-        gc_key_dict = json.loads(gc_key_json)
-        credentials = service_account.Credentials.from_service_account_info(gc_key_dict)
-        return storage.Client(credentials=credentials)
+    if get_environment() == 'development':
+        # Explicitly use service account credentials from file
+        credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+        if credentials_path:
+            credentials = service_account.Credentials.from_service_account_file(
+                credentials_path,
+                scopes=['https://www.googleapis.com/auth/cloud-platform'])
+            return storage.Client(credentials=credentials)
+        else:
+            logging.warning("GOOGLE_APPLICATION_CREDENTIALS not found")
+            return storage.Client()
     else:
-        logging.error("Google Cloud key JSON not found in environment variable MY_GC_KEY_SECRET")
-        return storage.Client()
+        gc_key_json = os.getenv("MY_GC_KEY_SECRET")
+        if gc_key_json:
+            gc_key_dict = json.loads(gc_key_json)
+            credentials = service_account.Credentials.from_service_account_info(gc_key_dict)
+            return storage.Client(credentials=credentials)
 
 
 # Add this new function to delete files from GCS

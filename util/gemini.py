@@ -21,10 +21,10 @@ class VertexAIUtility():
         vertexai.init(project="viddyscribe", location="us-east4")
         #vertexai.init(project="planar-abbey-418313", location="us-central1")  # Initialize here
         self.proModel = GenerativeModel(
-            "gemini-1.5-pro-001",
+            "gemini-1.5-pro-002",
         )
         self.flashModel = GenerativeModel(
-            "gemini-1.5-flash-001",
+            "gemini-1.5-flash-002",
         )
         pass
 
