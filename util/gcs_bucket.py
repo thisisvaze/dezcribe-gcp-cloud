@@ -8,7 +8,6 @@ from urllib.parse import unquote
 def get_environment():
     return os.getenv('ENVIRONMENT', 'development')
 
-
 def get_storage_client():
     if get_environment() == 'development':
         # Explicitly use service account credentials from file
@@ -27,7 +26,9 @@ def get_storage_client():
             gc_key_dict = json.loads(gc_key_json)
             credentials = service_account.Credentials.from_service_account_info(gc_key_dict)
             return storage.Client(credentials=credentials)
-
+        else:
+            logging.error("Google Cloud key JSON not found in environment variable MY_GC_KEY_SECRET")
+            return storage.Client()
 
 # Add this new function to delete files from GCS
 def delete_from_gcs(bucket_name, blob_name):
